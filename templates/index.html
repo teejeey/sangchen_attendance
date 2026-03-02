@@ -1,0 +1,430 @@
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Sangchen College</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        :root { --primary-dark: #2c3e50; --accent-blue: #3498db; }
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', sans-serif; margin: 0; }
+        
+        .sidebar { 
+            width: 260px; height: 100vh; background: var(--primary-dark); color: white; 
+            position: fixed; left: 0; top: 0; padding: 20px; z-index: 1000; transition: 0.3s;
+        }
+        .nav-link { color: #bdc3c7; padding: 12px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; text-decoration: none; display: block; }
+        .nav-link:hover, .nav-link.active { background: #34495e; color: white; }
+        
+        .content-area { margin-left: 260px; padding: 40px; transition: 0.3s; }
+        .main-card { background: white; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); padding: 30px; }
+        
+        .table-scroll { max-height: 65vh; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; }
+        
+        .sticky-thead th { 
+            position: sticky; top: 0; z-index: 10; 
+            background: #212529 !important; color: #ffffff !important; 
+            border: 1px solid #444; text-align: center; vertical-align: middle;
+        }
+
+        #mobile-toggle { display: none; position: fixed; top: 15px; left: 15px; z-index: 1100; background: var(--primary-dark); color: white; border: none; padding: 8px 15px; border-radius: 5px; }
+        
+        #takeAttendanceContainer { display: none; }
+
+        @media (max-width: 768px) {
+            #mobile-toggle { display: block; }
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .content-area { margin-left: 0; padding: 15px; padding-top: 70px; }
+        }
+
+        @media print {
+    /* 1. Hide UI elements and reset layout */
+    .sidebar, #mobile-toggle, .no-print, .btn, .btn-outline-primary, hr { 
+        display: none !important; 
+    }
+    .content-area { margin: 0 !important; padding: 0 !important; margin-left: 0 !important; }
+    .main-card { box-shadow: none !important; border: none !important; padding: 0 !important; }
+
+    /* 2. Remove the scrollbox limits */
+    .table-scroll { 
+        max-height: none !important; 
+        overflow: visible !important; 
+    }
+
+    /* 3. FIX: Disable sticky headers for PDF */
+    .sticky-thead th { 
+        position: static !important; /* This stops the header from 'floating' or shifting */
+        background-color: #f2f2f2 !important; /* Light gray for PDF headers */
+        color: black !important;
+        border: 1px solid #000 !important;
+    }
+
+    /* 4. Table Formatting */
+    table { 
+        width: 100% !important; 
+        border-collapse: collapse !important; 
+        table-layout: auto !important;
+    }
+    
+    td { 
+        border: 1px solid #000 !important; 
+        color: black !important;
+        padding: 6px !important;
+    }
+
+    /* 5. Center the College Info */
+    .print-header { 
+        display: block !important; 
+        text-align: center !important; 
+        margin-bottom: 20px !important;
+    }
+}
+    </style>
+</head>
+<body>
+
+    <button id="mobile-toggle" onclick="toggleSidebar()">☰ Menu</button>
+
+    <div class="sidebar" id="sidebar">
+        <div class="text-center mb-4">
+            <img src="{{ url_for('static', filename='logo.jpg') }}" alt="Logo" style="width: 70px; height: 70px; border-radius: 50%; background: white; padding: 3px; margin-bottom: 10px;">
+            <h6 class="fw-bold text-white small">Sangchen Dorji Lhundrup Nuns' Buddhist College</h6>
+            <hr class="opacity-25">
+            <p class="small text-info mb-0">Welcome: </p>
+            <div class="fw-bold text-white">{{ user_name }}</div>
+        </div>
+
+        <div class="nav flex-column">
+            <div id="navTake" class="nav-link active" onclick="showMode('take')"><i class="bi bi-pencil-square me-2"></i> Take Attendance</div>
+            <div id="navView" class="nav-link" onclick="showMode('view')"><i class="bi bi-file-earmark-bar-graph me-2"></i> View Reports</div>
+            <button id="refresh-cache-btn" class="btn btn-sm btn-outline-secondary no-print">
+                <i class="fas fa-sync-alt"></i> Refresh Sheet Data
+            </button>
+            <a href="{{ url_for('logout') }}" class="nav-link text-warning mt-5"><i class="bi bi-box-arrow-left me-2"></i> Logout</a>
+            
+        </div>
+    </div>
+
+    <div class="content-area">
+        <div class="main-card">
+            <h3 id="modeTitle" class="mb-4 fw-bold">Daily Attendance Entry</h3>
+
+            <div id="takeSection">
+                <div class="row g-3 mb-4 p-3 bg-light rounded border">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold small">Class</label>
+                        <select id="className" class="form-select" onchange="fetchStudents()"></select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold small">Time Table</label>
+                        <select id="timeTable" class="form-select" onchange="fetchStudents()"></select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold small">Date</label>
+                        <input type="date" id="attDate" class="form-control" readonly style="background:#e9ecef;">
+                    </div>
+                </div>
+
+                <div id="takePlaceholder" class="text-center p-5 text-muted border rounded bg-white">
+                    <i class="bi bi-info-circle fs-2"></i>
+                    <p class="mt-2">Please select both <b>Class</b> and <b>Time Table</b> to start taking attendance.</p>
+                </div>
+
+                <div id="takeAttendanceContainer">
+                    <div class="table-scroll">
+                        <table class="table table-hover align-middle">
+                            <thead class="sticky-thead">
+                                <tr><th>ID</th><th>Student Name</th><th>Status</th></tr>
+                            </thead>
+                            <tbody id="studentList"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-4 d-flex justify-content-between align-items-end p-3 bg-light rounded border">
+                        <div class="w-50">
+                            <label class="form-label fw-bold small">Actual Subject Taught</label>
+                            <input type="text" id="actualSubject" class="form-control" placeholder="e.g. English">
+                        </div>
+                        <button onclick="saveAttendance()" id="saveBtn" class="btn btn-success px-5 fw-bold" disabled>
+                            <span id="saveBtnText">Submit Attendance</span>
+                            <span id="saveBtnSpinner" class="spinner-border spinner-border-sm d-none"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="viewSection" style="display: none;">
+                <div class="d-flex mb-3 no-print">
+                    <button id="btnDailyView" class="btn btn-sm btn-outline-primary active me-2" onclick="showReportType('daily')">Daily View</button>
+                    <button id="btnMonthlyView" class="btn btn-sm btn-outline-primary" onclick="showReportType('monthly')">Monthly Summary</button>
+                </div>
+
+                <div class="row g-2 mb-4 p-3 bg-light rounded border align-items-end no-print">
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold small">Class</label>
+                        <select id="viewClass" class="form-select"></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold small">Teacher</label>
+                        <select id="viewTeacher" class="form-select"></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label id="dateLabel" class="form-label fw-bold small">Select Date</label>
+                        <input type="date" id="reportDate" class="form-control">
+                        <input type="month" id="reportMonth" class="form-control d-none">
+                    </div>
+                    <div class="col-md-3">
+                        <button onclick="generateReport()" class="btn btn-primary w-100 fw-bold shadow-sm">
+                            <i class="bi bi-search me-1"></i> Generate
+                        </button>
+                    </div>
+                </div>
+
+                <div id="reportHeaderInfo" class="text-center mb-4" style="display:none;">
+                    <h5 id="displayTeacher" class="fw-bold text-primary"></h5>
+                    <p id="displayMeta" class="text-muted small"></p>
+                    <button onclick="window.print()" class="btn btn-sm btn-outline-danger no-print"><i class="bi bi-printer"></i> Print PDF</button>
+                </div>
+
+                <div class="table-scroll">
+                    <table class="table table-bordered align-middle bg-white">
+                        <thead class="sticky-thead"></thead>
+                        <tbody id="reportList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let reportType = 'daily';
+
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+
+        function showMode(mode) {
+            document.getElementById('takeSection').style.display = mode === 'take' ? 'block' : 'none';
+            document.getElementById('viewSection').style.display = mode === 'view' ? 'block' : 'none';
+            document.getElementById('navTake').classList.toggle('active', mode === 'take');
+            document.getElementById('navView').classList.toggle('active', mode === 'view');
+            document.getElementById('modeTitle').innerText = mode === 'take' ? 'Daily Attendance Entry' : 'Attendance Records';
+        }
+
+        document.getElementById('refresh-cache-btn').addEventListener('click', function() {
+            const btn = this;
+            const originalText = btn.innerHTML;
+            
+            // 1. Change button state to show it's working
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+            btn.disabled = true;
+
+            // 2. Call the Flask route to clear the cache
+            fetch('/clear_cache')
+                .then(response => response.json())
+                .then(data => {
+                    alert("Success: The local cache is cleared. Your next fetch will pull fresh data from Google Sheets.");
+                    
+                    // 3. Reset button
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    
+                    // Optional: Automatically trigger a reload of the current class
+                    // if (currentClass) fetchStudents(currentClass); 
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert("Failed to clear cache.");
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                });
+        });
+
+        // --- UPDATED: Clears data when switching report types ---
+        function showReportType(type) {
+            reportType = type;
+            
+            // Toggle active buttons
+            document.getElementById('btnDailyView').classList.toggle('active', type === 'daily');
+            document.getElementById('btnMonthlyView').classList.toggle('active', type === 'monthly');
+            
+            // Toggle Inputs
+            document.getElementById('reportDate').classList.toggle('d-none', type === 'monthly');
+            document.getElementById('reportMonth').classList.toggle('d-none', type === 'daily');
+            document.getElementById('dateLabel').innerText = type === 'daily' ? 'Select Date' : 'Select Month';
+            
+            // RESET FILTERS TO DEFAULT
+            document.getElementById('viewClass').value = "";
+            document.getElementById('viewTeacher').value = "";
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('reportDate').value = today;
+            document.getElementById('reportMonth').value = today.substring(0, 7);
+
+            // FLUSH PREVIOUS TABLE DATA
+            document.querySelector("#viewSection table thead").innerHTML = "";
+            document.getElementById('reportList').innerHTML = '<tr><td colspan="10" class="text-center p-5 text-muted">Select filters and click Generate</td></tr>';
+            document.getElementById('reportHeaderInfo').style.display = 'none';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('attDate').value = today;
+            document.getElementById('reportDate').value = today;
+            document.getElementById('reportMonth').value = today.substring(0, 7);
+
+            fetch('/get_teachers').then(res => res.json()).then(data => {
+                let h = '<option value="">-- Select Teacher --</option>';
+                data.forEach(t => h += `<option value="${t}">${t}</option>`);
+                document.getElementById('viewTeacher').innerHTML = h;
+            });
+
+            fetch('/get_classes').then(res => res.json()).then(data => {
+                const filtered = data.filter(n => !['Settings', 'Teachers', 'Time_table'].includes(n));
+                let h = '<option value="">-- Select Class --</option>';
+                filtered.forEach(c => h += `<option value="${c}">${c}</option>`);
+                document.getElementById('className').innerHTML = h;
+                document.getElementById('viewClass').innerHTML = h;
+            });
+
+            fetch('/get_timetable').then(res => res.json()).then(data => {
+                let h = '<option value="">-- Select Time Slot --</option>';
+                data.forEach(s => h += `<option value="${s}">${s}</option>`);
+                document.getElementById('timeTable').innerHTML = h;
+            });
+        });
+
+        function fetchStudents() {
+            const cls = document.getElementById('className').value;
+            const slot = document.getElementById('timeTable').value;
+            const container = document.getElementById('takeAttendanceContainer');
+            const placeholder = document.getElementById('takePlaceholder');
+            const list = document.getElementById('studentList');
+            const saveBtn = document.getElementById('saveBtn');
+
+            if(!cls || !slot) {
+                container.style.display = 'none';
+                placeholder.style.display = 'block';
+                saveBtn.disabled = true;
+                return;
+            }
+
+            placeholder.style.display = 'none';
+            container.style.display = 'block';
+            saveBtn.disabled = true; 
+            list.innerHTML = '<tr><td colspan="3" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2">Loading students...</p></td></tr>';
+
+            fetch(`/get_students/${cls}?date=${document.getElementById('attDate').value}&subject=${encodeURIComponent(slot)}`)
+            .then(res => res.json()).then(data => {
+                if(data.already_taken) {
+                    list.innerHTML = '<tr><td colspan="3" class="text-center p-5 text-danger fw-bold"><i class="bi bi-check-circle-fill fs-3"></i><br>Attendance already saved for this slot.</td></tr>';
+                    saveBtn.disabled = true;
+                } else if (data.students && data.students.length > 0) {
+                    let h = '';
+                    data.students.forEach(s => {
+                        h += `<tr><td>${s.ID}</td><td>${s.Name}</td><td>
+                            <select class="form-select att-val" data-id="${s.ID}">
+                                <option value="Present">Present</option><option value="Absent">Absent</option>
+                                <option value="Sick">Sick</option><option value="Leave">Leave</option>
+                            </select></td></tr>`;
+                    });
+                    list.innerHTML = h;
+                    saveBtn.disabled = false;
+                } else {
+                    list.innerHTML = '<tr><td colspan="3" class="text-center p-5 text-muted">No students found.</td></tr>';
+                }
+            }).catch(() => { saveBtn.disabled = true; });
+        }
+
+        function saveAttendance() {
+            const sub = document.getElementById('actualSubject').value.trim();
+            const saveBtn = document.getElementById('saveBtn');
+            if(!sub) return alert("Please enter the 'Actual Subject Taught'.");
+
+            saveBtn.disabled = true;
+            document.getElementById('saveBtnText').innerText = "Saving...";
+            document.getElementById('saveBtnSpinner').classList.remove('d-none');
+
+            const payload = {
+                class_name: document.getElementById('className').value,
+                time_slot: document.getElementById('timeTable').value,
+                actual_subject: sub,
+                date: document.getElementById('attDate').value,
+                attendance_data: {}
+            };
+            document.querySelectorAll('.att-val').forEach(el => payload.attendance_data[el.dataset.id] = el.value);
+            
+            fetch('/save_attendance', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) })
+            .then(res => res.json()).then(data => { alert(data.message); location.reload(); });
+        }
+
+        function generateReport() {
+            const cls = document.getElementById('viewClass').value;
+            const teacher = document.getElementById('viewTeacher').value;
+            const dateVal = reportType === 'daily' ? document.getElementById('reportDate').value : document.getElementById('reportMonth').value;
+            
+            if(!cls || !teacher || !dateVal) return alert("Please select Class, Teacher and Date/Month.");
+
+            const list = document.getElementById('reportList');
+            list.innerHTML = '<tr><td colspan="10" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><br>Generating Report...</td></tr>';
+
+            fetch(`/get_reports?class=${cls}&view_type=${reportType}&date=${dateVal}&teacher=${encodeURIComponent(teacher)}`)
+            .then(res => res.json()).then(data => {
+                if(data.error) { list.innerHTML = `<tr><td colspan="10" class="text-center text-danger p-5">${data.error}</td></tr>`; return; }
+                
+                document.getElementById('reportHeaderInfo').style.display = 'block';
+                document.getElementById('displayTeacher').innerText = data.teacher_name;
+                document.getElementById('displayMeta').innerText = `${reportType.toUpperCase()} | ${cls} | ${dateVal}`;
+
+                let head = ""; let body = "";
+                
+                // --- UPDATED: Monthly Report Headers as requested ---
+                if(reportType === 'monthly') {
+                    head = `<tr>
+                        <th class="text-white">ID</th>
+                        <th class="text-white">Name</th>
+                        <th class="text-white">Total class</th>
+                        <th class="bg-success text-white">Present</th>
+                        <th class="bg-danger text-white">Absent</th>
+                        <th class="bg-warning text-dark">Sick</th>
+                        <th class="bg-info text-dark">Leave</th>
+                        <th class="text-white">%</th>
+                    </tr>`;
+                    data.records.forEach(s => {
+                        const pct = s.total_sessions > 0 ? ((s.summary.P / s.total_sessions) * 100).toFixed(1) : 0;
+                        body += `<tr><td>${s.ID}</td><td class="fw-bold">${s.Name}</td><td class="text-center">${s.total_sessions}</td>
+                            <td class="text-center text-success fw-bold">${s.summary.P}</td>
+                            <td class="text-center text-danger fw-bold">${s.summary.A}</td>
+                            <td class="text-center text-warning fw-bold">${s.summary.S}</td>
+                            <td class="text-center text-info fw-bold">${s.summary.L}</td>
+                            <td class="text-center fw-bold ${pct < 75 ? 'text-danger':''}">${pct}%</td></tr>`;
+                    });
+                } else {
+                    head = `<tr><th class="text-white">ID</th><th class="text-white">Name</th>`;
+                    data.days_header.forEach(h => head += `<th class="text-white" style="font-size: 0.7rem;">${h}</th>`);
+                    head += `</tr>`;
+                    data.records.forEach(s => {
+                        body += `<tr><td>${s.ID}</td><td class="fw-bold">${s.Name}</td>`;
+                        data.days_header.forEach(h => {
+                            const val = s.days[h] || "-";
+                            const char = val.charAt(0);
+                            let colorClass = "";
+                            if (val === "Present") colorClass = "text-success";
+                            else if (val === "Absent") colorClass = "text-danger";
+                            else if (val === "Sick") colorClass = "text-warning";
+                            else if (val === "Leave") colorClass = "text-info";
+                            body += `<td class="text-center fw-bold ${colorClass}">${char}</td>`;
+                        });
+                        body += `</tr>`;
+                    });
+                }
+                document.querySelector("#viewSection table thead").innerHTML = head;
+                list.innerHTML = body;
+            });
+        }
+    </script>
+</body>
+</html>
+
