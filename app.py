@@ -1,7 +1,9 @@
 import os
+from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import requests
 from flask_caching import Cache
+from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 
 # 1. Load the environment variables from your .env file
@@ -13,27 +15,49 @@ app = Flask(__name__)
 cache = Cache(config={'CACHE_TYPE': 'SimpleCache'})
 cache.init_app(app)
 
-# 2. Retrieve variables from the environment
-# If 'SECRET_KEY' isn't found in .env, it uses the fallback string provided
-app.secret_key = os.getenv("SECRET_KEY", "fallback_secret_key_for_local_only")
+# 2. Retrieve variables from the environment - SECRET_KEY is required (no fallback)
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY must be set in .env. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+app.secret_key = SECRET_KEY
+
+# Session cookie security
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+# CSRF protection for all POST/PUT/DELETE
+csrf = CSRFProtect(app)
 
 # Retrieve your Apps Script URL
 APPS_SCRIPT_URL = os.getenv("APPS_SCRIPT_URL")
-
-# --- Verification Check (Optional but helpful for debugging) ---
 if not APPS_SCRIPT_URL:
-    print("Error: APPS_SCRIPT_URL not found in .env file!")
+    raise RuntimeError("APPS_SCRIPT_URL must be set in .env file!")
+
+
+def login_required(f):
+    """Decorator: redirect to login if user not in session."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user' not in session:
+            if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"error": "Unauthorized"}), 401
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
 
 
 @app.route('/')
+@login_required
 def index():
     """Dashboard: Only accessible if logged in."""
-    if 'user' not in session:
-        return redirect(url_for('login'))
     return render_template('index.html', user_name=session.get('full_name'))
 
 
 @app.route('/clear_cache')
+@login_required
 def clear_cache():
     cache.clear()  # This wipes the entire SimpleCache
     return jsonify({"status": "success", "message": "Cache cleared! Fetching fresh data..."})
@@ -69,6 +93,7 @@ def login():
     return render_template('login.html')
 
 @app.route('/get_classes')
+@login_required
 @cache.cached(timeout=6 * 60 * 60)
 def get_classes():
     resp = requests.get(f"{APPS_SCRIPT_URL}?action=getClasses")
@@ -76,6 +101,7 @@ def get_classes():
 
 # --- RENAMED FOR CONSISTENCY ---
 @app.route('/get_timetable')
+@login_required
 @cache.cached(timeout=6 * 60 * 60)
 def get_timetable_slots():
     """Fetches the slots from the Time_table sheet via Google Apps Script."""
@@ -83,6 +109,7 @@ def get_timetable_slots():
     return jsonify(resp.json())
 
 @app.route('/get_students/<class_name>')
+@login_required
 @cache.cached(timeout=6 * 60 * 60)
 def get_students(class_name):
     # 'subject' is what the HTML frontend sends, we map it to 'time_table' for Google
@@ -99,6 +126,7 @@ def get_students(class_name):
         return jsonify({"students": [], "already_taken": False, "error": str(e)})
 
 @app.route('/get_teachers')
+@login_required
 @cache.cached(timeout=6 * 60 * 60)
 def get_teachers():
     """Fetches the list of Full Names from the Teachers sheet via Apps Script."""
@@ -112,6 +140,7 @@ def get_teachers():
         return jsonify([])
 
 @app.route('/save_attendance', methods=['POST'])
+@login_required
 def save_attendance():
     incoming_data = request.json
     
@@ -141,6 +170,7 @@ def save_attendance():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/get_reports')
+@login_required
 def get_reports():
     # 1. Get parameters from JavaScript
     cls = request.args.get('class')
