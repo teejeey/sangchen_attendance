@@ -329,6 +329,15 @@
             document.getElementById('saveBtnText').innerText = "Saving...";
             document.getElementById('saveBtnSpinner').classList.remove('d-none');
 
+            // Lock the UI while saving to prevent edits mid-submit
+            const lockEls = [
+                document.getElementById('className'),
+                document.getElementById('timeTable'),
+                document.getElementById('actualSubject')
+            ].filter(Boolean);
+            lockEls.forEach(el => el.disabled = true);
+            document.querySelectorAll('.att-val').forEach(el => el.disabled = true);
+
             const payload = {
                 class_name: document.getElementById('className').value,
                 time_slot: document.getElementById('timeTable').value,
@@ -342,7 +351,34 @@
             const headers = {'Content-Type': 'application/json'};
             if (csrfToken) headers['X-CSRFToken'] = csrfToken;
             fetch('/save_attendance', { method: 'POST', headers: headers, body: JSON.stringify(payload) })
-            .then(res => res.json()).then(data => { alert(data.message); location.reload(); });
+            .then(async (res) => {
+                if (res.status === 401) {
+                    window.location.href = '/login';
+                    return null;
+                }
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data?.error || 'Failed to save attendance');
+                }
+                return data;
+            })
+            .then(data => {
+                if (!data) return;
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                alert(data.message || "Attendance saved successfully!");
+                location.reload();
+            })
+            .catch((err) => {
+                alert(err?.message || "Failed to save attendance.");
+                // Re-enable UI so user can retry
+                lockEls.forEach(el => el.disabled = false);
+                document.querySelectorAll('.att-val').forEach(el => el.disabled = false);
+                saveBtn.disabled = false;
+                document.getElementById('saveBtnText').innerText = "Submit Attendance";
+                document.getElementById('saveBtnSpinner').classList.add('d-none');
+            });
         }
 
         function generateReport() {
