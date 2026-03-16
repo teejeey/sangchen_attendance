@@ -1,0 +1,241 @@
+// Apps Script backend: Full updated version
+
+function _jsonOutput(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// =====================
+// GET requests (read-only)
+// =====================
+function doGet(e) {
+  const action = (e.parameter && e.parameter.action) || '';
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ---------------------
+  // Teachers / Authentication
+  // ---------------------
+  if (action === 'verifyTeacher' || action === 'getTeachers') {
+    const sheet = ss.getSheetByName('Teachers');
+    if (!sheet) return _jsonOutput(action === 'verifyTeacher' ? {"status": "fail"} : []);
+    const data = sheet.getDataRange().getValues();
+
+    if (action === 'verifyTeacher') {
+      const user = (e.parameter.username || '').toString().trim();
+      const pass = (e.parameter.password || '').toString().trim();
+      for (let i = 1; i < data.length; i++) {
+        if (data[i][2].toString().trim() === user && data[i][3].toString().trim() === pass) {
+          return _jsonOutput({"status": "success", "full_name": data[i][1]});
+        }
+      }
+      return _jsonOutput({"status": "fail"});
+    }
+
+    // getTeachers: return list of full names
+    return _jsonOutput(data.slice(1).map(r => r[1]).filter(n => n !== ''));
+  }
+
+  // ---------------------
+  // Get Classes
+  // ---------------------
+  if (action === 'getClasses') {
+    const exclude = ['Teachers', 'Time_table', 'Subject'];
+    const sheets = ss.getSheets().map(s => s.getName()).filter(name => !exclude.includes(name));
+    return _jsonOutput(sheets);
+  }
+
+  // ---------------------
+  // Get Subjects
+  // ---------------------
+  if (action === 'getSubjects') {
+    const className = e.parameter.className;
+    const sheet = ss.getSheetByName('Subject');
+    if (!sheet) return _jsonOutput([]);
+    const data = sheet.getDataRange().getValues();
+    const subjects = data.slice(1)
+      .filter(row => row[1].toString().trim() === className)
+      .map(row => row[2].toString().trim());
+    return _jsonOutput(subjects);
+  }
+
+  // ---------------------
+  // Get Students / Reports
+  // ---------------------
+  if (action === 'getStudents' || action === 'getReports') {
+    const className = e.parameter.className || e.parameter.class;
+    const sheet = ss.getSheetByName(className);
+    if (!sheet) return _jsonOutput({"error": "Sheet not found"});
+
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => h.toString());
+    const idIdx = headers.indexOf('ID');
+    const nameIdx = headers.indexOf('Name');
+
+    if (action === 'getStudents') {
+      const date = e.parameter.date;
+      const subject = e.parameter.subject;
+      const teacher = e.parameter.teacher;
+
+      // Match header containing Date + Subject + Teacher
+      let colIndex = -1;
+      headers.forEach((h, idx) => {
+        const headerStr = h.toString();
+        if (headerStr.includes(date) && headerStr.includes(subject) && headerStr.includes(teacher)) {
+          colIndex = idx;
+        }
+      });
+
+      let alreadyTaken = false;
+      if (colIndex !== -1) {
+        const colValues = sheet.getRange(2, colIndex + 1, sheet.getLastRow() - 1, 1).getValues();
+        alreadyTaken = colValues.some(r => r[0] !== '' && r[0] !== null);
+      }
+
+      const students = data.slice(1)
+        .filter(r => r[idIdx])
+        .map(r => ({"ID": r[idIdx].toString(), "Name": r[nameIdx].toString()}));
+
+      return _jsonOutput({"students": students, "already_taken": Boolean(alreadyTaken)});
+    }
+
+    if (action === 'getReports') {
+      const dateVal = e.parameter.date;
+      const teacher = e.parameter.teacher;
+      const viewType = e.parameter.view_type;
+      const subject = e.parameter.subject;
+
+      const colIndices = [];
+      const foundHeaders = [];
+
+      headers.forEach((h, k) => {
+        const headerStr = h.toString();
+        if (viewType === 'subject') {
+          if (headerStr.includes(dateVal) && subject && headerStr.includes(subject)) {
+            colIndices.push(k);
+            const parts = headerStr.split(' - ');
+            foundHeaders.push(parts.length >= 3 ? parts[1] + ' ' + parts[2] : 'Col ' + k);
+          }
+        } else {
+          if (headerStr.includes(dateVal) && headerStr.includes(teacher)) {
+            colIndices.push(k);
+            const parts = headerStr.split(' - ');
+            // Daily view: show only the subject (hide teacher name in header)
+            if (viewType === 'daily') {
+              foundHeaders.push(parts.length >= 2 ? parts[1] : 'Col ' + k);
+            } else {
+              foundHeaders.push(parts.length >= 3 ? parts[1] + ' ' + parts[2] : 'Col ' + k);
+            }
+          }
+        }
+      });
+
+      if (!colIndices.length) return _jsonOutput({"error": "No records found"});
+
+      const records = data.slice(1)
+        .filter(r => r[idIdx])
+        .map(r => {
+          if (viewType === 'monthly' || viewType === 'subject') {
+            const counts = {P: 0, A: 0, S: 0, L: 0, La: 0};
+            colIndices.forEach(cIdx => {
+              const val = (r[cIdx] || '').toString().trim();
+              if (val === 'Present') counts.P++;
+              else if (val === 'Absent') counts.A++;
+              else if (val === 'Sick') counts.S++;
+              else if (val === 'Leave') counts.L++;
+              else if (val === 'Late') counts.La++;
+            });
+            return {"ID": r[idIdx], "Name": r[nameIdx], "total_sessions": colIndices.length, "summary": counts};
+          } else {
+            const student = {"ID": r[idIdx], "Name": r[nameIdx], "days": {}};
+            colIndices.forEach((cIdx, idx) => { student.days[foundHeaders[idx]] = r[cIdx] || '-'; });
+            return student;
+          }
+        });
+
+      const displayName = viewType === 'subject' ? subject : teacher;
+      return _jsonOutput({"records": records, "teacher_name": displayName, "days_header": viewType === 'daily' ? foundHeaders : null});
+    }
+  }
+
+  return _jsonOutput({"error": "Unknown action"});
+}
+
+// =====================
+// POST requests (write / auth)
+// =====================
+function doPost(e) {
+  const contentType = e.postData && e.postData.type ? e.postData.type : 'application/json';
+  let payload = {};
+  try {
+    if (contentType.indexOf('application/json') !== -1) {
+      payload = JSON.parse(e.postData.contents || '{}');
+    } else {
+      payload = e.parameter || {};
+    }
+  } catch (err) {
+    return _jsonOutput({"error": "Invalid JSON"});
+  }
+
+  const action = payload.action || '';
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // ---------------------
+  // Login
+  // ---------------------
+  if (action === 'verifyTeacher') {
+    const sheet = ss.getSheetByName('Teachers');
+    if (!sheet) return _jsonOutput({"status": "fail"});
+    const data = sheet.getDataRange().getValues();
+    const user = (payload.username || '').toString().trim();
+    const pass = (payload.password || '').toString().trim();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][2].toString().trim() === user && data[i][3].toString().trim() === pass) {
+        return _jsonOutput({"status": "success", "full_name": data[i][1]});
+      }
+    }
+    return _jsonOutput({"status": "fail"});
+  }
+
+  // ---------------------
+  // Save Attendance
+  // ---------------------
+  if (action === 'saveAttendance') {
+    const className = payload.class_name;
+    const fullHeader = payload.time_table; // format: "YYYY-MM-DD - Subject - Teacher"
+    const attendanceData = payload.attendance_data || {};
+
+    const sheet = ss.getSheetByName(className);
+    if (!sheet) return _jsonOutput({"error": "Class not found"});
+
+    const fullData = sheet.getDataRange().getValues();
+    const headers = fullData[0].map(h => h.toString());
+    let colIndex = headers.indexOf(fullHeader);
+
+    // Prevent duplicate attendance
+    if (colIndex !== -1) {
+      const colValues = sheet.getRange(2, colIndex + 1, sheet.getLastRow() - 1, 1).getValues();
+      if (colValues.some(r => r[0] !== '' && r[0] !== null)) {
+        return _jsonOutput({"status": "exists", "error": "Attendance already recorded"});
+      }
+    }
+
+    // Create new column if missing
+    if (colIndex === -1) {
+      colIndex = headers.length;
+      sheet.getRange(1, colIndex + 1).setValue(fullHeader).setFontWeight('bold');
+    }
+
+    // Write attendance
+    const idCol = fullData.map(r => r[0].toString().trim());
+    const writeData = [];
+    for (let i = 1; i < idCol.length; i++) {
+      writeData.push([attendanceData[idCol[i]] || '']);
+    }
+
+    sheet.getRange(2, colIndex + 1, writeData.length, 1).setValues(writeData);
+
+    return _jsonOutput({"status": "success"});
+  }
+
+  return _jsonOutput({"error": "Unsupported action in POST"});
+}

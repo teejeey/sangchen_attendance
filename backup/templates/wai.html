@@ -1,0 +1,53 @@
+function fetchStudents() {
+    const cls = document.getElementById('className').value;
+    const slot = document.getElementById('timeTable').value;
+    const container = document.getElementById('takeAttendanceContainer');
+    const placeholder = document.getElementById('takePlaceholder');
+    const list = document.getElementById('studentList');
+    const saveBtn = document.getElementById('saveBtn');
+
+    if(!cls || !slot) {
+        container.style.display = 'none';
+        placeholder.style.display = 'block';
+        saveBtn.disabled = true;
+        return;
+    }
+
+    placeholder.style.display = 'none';
+    container.style.display = 'block';
+    saveBtn.disabled = true; 
+    list.innerHTML = '<tr><td colspan="3" class="text-center p-5"><div class="spinner-border text-primary"></div></td></tr>';
+
+    fetch(`/get_students/${cls}?date=${document.getElementById('attDate').value}&subject=${encodeURIComponent(slot)}`)
+    .then(res => res.json()).then(data => {
+        const alreadyTaken = (
+            data.already_taken === true ||
+            data.already_taken === 'true' ||
+            data.already_taken === 'TRUE'
+        );
+
+        if (alreadyTaken) {
+            list.innerHTML = '<tr><td colspan="3" class="text-center p-5 text-danger fw-bold"><i class="bi bi-check-circle-fill fs-3"></i><br>Already saved.</td></tr>';
+        } 
+        else if (data.students && data.students.length > 0) {
+            let h = '';
+            data.students.forEach(s => {
+                h += `<tr><td>${s.ID}</td><td>${s.Name}</td><td>
+                    <select class="form-select att-val" data-id="${s.ID}">
+                        <option value="Present">✔️ ཡོད</option>
+                        <option value="Absent">❌ མིན</option>
+                        <option value="Sick">🤒 ན</option>
+                        <option value="Leave">🚗 ཞུ</option>
+                        <option value="Late">⏰ འཕྱིས</option>
+                    </select></td></tr>`;
+            });
+            
+            list.innerHTML = h;
+            saveBtn.disabled = false;
+        }
+        
+        else {
+            list.innerHTML = '<tr><td colspan="3" class="text-center p-5 text-muted">No students found.</td></tr>';
+        }
+    });
+}

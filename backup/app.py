@@ -6,8 +6,6 @@ from flask_caching import Cache
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 from datetime import timedelta
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 # Load environment variables
 load_dotenv()
@@ -42,72 +40,31 @@ APPS_SCRIPT_URL = os.getenv("APPS_SCRIPT_URL")
 if not APPS_SCRIPT_URL:
     raise RuntimeError("APPS_SCRIPT_URL must be set in .env file!")
 
-# Reusable HTTP session with retries (helps with transient TLS/EOF/network flakiness)
-_http = requests.Session()
-_retry = Retry(
-    total=int(os.getenv("HTTP_RETRY_TOTAL", "3")),
-    connect=int(os.getenv("HTTP_RETRY_CONNECT", "3")),
-    read=int(os.getenv("HTTP_RETRY_READ", "3")),
-    backoff_factor=float(os.getenv("HTTP_RETRY_BACKOFF", "0.5")),
-    status_forcelist=(429, 500, 502, 503, 504),
-    allowed_methods=("GET", "POST"),
-    raise_on_status=False,
-)
-_adapter = HTTPAdapter(max_retries=_retry)
-_http.mount("https://", _adapter)
-_http.mount("http://", _adapter)
-
-# Slightly more "browser-like" UA can reduce certain edge blocking
-_DEFAULT_HEADERS = {"User-Agent": os.getenv("HTTP_USER_AGENT", "Mozilla/5.0 (AttendanceApp)")}
-
-
-def _redact_payload(data):
-    """
-    Return a shallow-copied structure with sensitive keys redacted.
-    This is only for logging, never modify originals in-place.
-    """
-    if not isinstance(data, dict):
-        return data
-    redacted = {}
-    sensitive_keys = {"password", "pass", "pwd", "secret", "token", "authorization"}
-    for k, v in data.items():
-        if k.lower() in sensitive_keys:
-            redacted[k] = "***REDACTED***"
-        else:
-            redacted[k] = v
-    return redacted
-
 # Helper: safe GET to external service with timeout and error handling
 def safe_get(url, params=None, timeout=10):
     try:
-        resp = _http.get(url, params=params, timeout=timeout, headers=_DEFAULT_HEADERS)
+        resp = requests.get(url, params=params, timeout=timeout)
         resp.raise_for_status()
         try:
             return resp.json()
         except ValueError:
             return {'raw': resp.text}
-    except requests.exceptions.SSLError as e:
-        app.logger.error("SSL error for %s with params=%s: %s", url, _redact_payload(params or {}), e)
-        return None
     except requests.RequestException as e:
-        # Log server-side; do not expose stack traces or secrets to clients
-        app.logger.error("HTTP GET error for %s with params=%s: %s", url, _redact_payload(params or {}), e)
+        # Log server-side; do not expose stack traces to clients
+        print(f"HTTP GET error for {url} with params={params}: {e}")
         return None
 
 # Helper: safe POST
 def safe_post(url, json=None, timeout=15):
     try:
-        resp = _http.post(url, json=json, timeout=timeout, headers=_DEFAULT_HEADERS)
+        resp = requests.post(url, json=json, timeout=timeout)
         resp.raise_for_status()
         try:
             return resp.json(), resp
         except ValueError:
             return {'raw': resp.text}, resp
-    except requests.exceptions.SSLError as e:
-        app.logger.error("SSL error for %s json=%s: %s", url, _redact_payload(json or {}), e)
-        return None, None
     except requests.RequestException as e:
-        app.logger.error("HTTP POST error for %s json=%s: %s", url, _redact_payload(json or {}), e)
+        print(f"HTTP POST error for {url} json={json}: {e}")
         return None, None
 
 # Helper: identify AJAX-like requests and request for JSON responses
@@ -215,15 +172,14 @@ def get_timetable_slots():
 @login_required
 def get_students(class_name):
     # Frontend sends 'subject' query param which is actually the time slot label
-    subject = request.args.get('subject')
+    slot = request.args.get('subject')
     date = request.args.get('date')
     teacher_name = session.get('full_name')
 
     params = {
         "action": "getStudents",
         "className": class_name,
-        # Apps Script expects this value under the 'subject' key
-        "subject": subject,
+        "time_table": slot,
         "date": date,
         "teacher": teacher_name
     }
@@ -299,7 +255,7 @@ def get_reports():
 
     result = safe_get(APPS_SCRIPT_URL, params=params, timeout=20)
     if result is None:
-        return jsonify({"error": "Report service unavailable. Please try again."}), 503
+        return jsonify({"error": "Failed to connect to Google Sheets"}), 500
     return jsonify(result)
 
 
