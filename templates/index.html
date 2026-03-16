@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -225,10 +225,15 @@
             document.getElementById('timetableSection').style.display = mode === 'timetable' ? 'block' : 'none';
             document.getElementById('navTake').classList.toggle('active', mode === 'take');
             document.getElementById('navView').classList.toggle('active', mode === 'view');
-            document.getElementById('navTimetable').classList.toggle('active', mode === 'timetable');
+            const navTimetable = document.getElementById('navTimetable');
+            if (navTimetable) {
+                navTimetable.classList.toggle('active', mode === 'timetable');
+            }
             document.getElementById('navTake').setAttribute('aria-pressed', mode === 'take');
             document.getElementById('navView').setAttribute('aria-pressed', mode === 'view');
-            document.getElementById('navTimetable').setAttribute('aria-pressed', mode === 'timetable');
+            if (navTimetable) {
+                navTimetable.setAttribute('aria-pressed', mode === 'timetable');
+            }
             document.getElementById('modeTitle').innerText = 
                 mode === 'take' ? 'Daily Attendance Entry' : 
                 mode === 'view' ? 'Attendance Records' : 'Sangchen Dorji Lhundrup Nunnery Time Table - 2026';
