@@ -5,7 +5,7 @@ import requests
 from flask_caching import Cache
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
-from datetime import timedelta
+from datetime import timedelta, datetime
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -255,7 +255,9 @@ def save_attendance():
 
     teacher = session.get('full_name', 'Teacher')
 
-    full_header = f"{date_val} - {time_slot} ({actual_sub}) - {teacher}"
+    # Use current local time (12-hour clock with AM/PM) for the sheet header
+    current_time_str = datetime.now().strftime('%I:%M %p')
+    full_header = f"{date_val} - {current_time_str} ({actual_sub}) - {teacher}"
 
     payload = {
         "action": "saveAttendance",
