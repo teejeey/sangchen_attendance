@@ -6,6 +6,7 @@ from flask_caching import Cache
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 from datetime import timedelta, datetime
+from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -41,6 +42,9 @@ csrf = CSRFProtect(app)
 APPS_SCRIPT_URL = os.getenv("APPS_SCRIPT_URL")
 if not APPS_SCRIPT_URL:
     raise RuntimeError("APPS_SCRIPT_URL must be set in .env file!")
+
+# Timezone for timestamps stored in sheet headers (Render defaults to UTC)
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Asia/Thimphu")
 
 # Reusable HTTP session with retries (helps with transient TLS/EOF/network flakiness)
 _http = requests.Session()
@@ -255,8 +259,8 @@ def save_attendance():
 
     teacher = session.get('full_name', 'Teacher')
 
-    # Use current local time (12-hour clock with AM/PM) for the sheet header
-    current_time_str = datetime.now().strftime('%I:%M %p')
+    # Use configured timezone for the sheet header (avoid UTC offset on deploy)
+    current_time_str = datetime.now(ZoneInfo(APP_TIMEZONE)).strftime('%I:%M %p')
     full_header = f"{date_val} - {current_time_str} ({actual_sub}) - {teacher}"
 
     payload = {
