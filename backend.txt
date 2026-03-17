@@ -109,11 +109,21 @@ function doGet(e) {
 
       headers.forEach((h, k) => {
         const headerStr = h.toString();
-        if (viewType === 'subject') {
+        if (viewType === 'subject' || viewType === 'subject_grid') {
           if (headerStr.includes(dateVal) && subject && headerStr.includes(subject)) {
             colIndices.push(k);
             const parts = headerStr.split(' - ');
-            foundHeaders.push(parts.length >= 3 ? parts[1] + ' ' + parts[2] : 'Col ' + k);
+            if (viewType === 'subject_grid') {
+              // For grid view, header is the date (YYYY-MM-DD) so we can render 1..end of month
+              const iso = (parts.length >= 1 ? parts[0] : '').toString().trim(); // "YYYY-MM-DD"
+              let label = iso;
+              if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+                label = iso.slice(5); // "MM-DD"
+              }
+              foundHeaders.push(label || ('Col ' + k));
+            } else {
+              foundHeaders.push(parts.length >= 3 ? parts[1] + ' ' + parts[2] : 'Col ' + k);
+            }
           }
         } else {
           if (headerStr.includes(dateVal) && headerStr.includes(teacher)) {
@@ -131,6 +141,16 @@ function doGet(e) {
 
       if (!colIndices.length) return _jsonOutput({"error": "No records found"});
 
+      function _statusPriority(val) {
+        // Higher number means higher priority
+        if (val === 'Absent') return 50;
+        if (val === 'Sick') return 40;
+        if (val === 'Leave') return 30;
+        if (val === 'Late') return 20;
+        if (val === 'Present') return 10;
+        return 0;
+      }
+
       const records = data.slice(1)
         .filter(r => r[idIdx])
         .map(r => {
@@ -145,6 +165,33 @@ function doGet(e) {
               else if (val === 'Late') counts.La++;
             });
             return {"ID": r[idIdx], "Name": r[nameIdx], "total_sessions": colIndices.length, "summary": counts};
+          } else if (viewType === 'subject_grid') {
+            // Build a per-day status (1..end) by aggregating multiple sessions in same date.
+            const counts = {P: 0, A: 0, S: 0, L: 0, La: 0};
+            const perDay = {}; // date -> status
+
+            colIndices.forEach((cIdx, idx) => {
+              const dayKey = foundHeaders[idx]; // YYYY-MM-DD
+              const val = (r[cIdx] || '').toString().trim() || '-';
+
+              // counts (session-level)
+              if (val === 'Present') counts.P++;
+              else if (val === 'Absent') counts.A++;
+              else if (val === 'Sick') counts.S++;
+              else if (val === 'Leave') counts.L++;
+              else if (val === 'Late') counts.La++;
+
+              // per-day aggregation by priority
+              const prev = perDay[dayKey] || '-';
+              if (_statusPriority(val) >= _statusPriority(prev)) {
+                perDay[dayKey] = val;
+              }
+            });
+
+            // Ensure every header day exists
+            foundHeaders.forEach(d => { if (!(d in perDay)) perDay[d] = '-'; });
+
+            return {"ID": r[idIdx], "Name": r[nameIdx], "days": perDay, "total_sessions": colIndices.length, "summary": counts};
           } else {
             const student = {"ID": r[idIdx], "Name": r[nameIdx], "days": {}};
             colIndices.forEach((cIdx, idx) => { student.days[foundHeaders[idx]] = r[cIdx] || '-'; });
@@ -152,8 +199,9 @@ function doGet(e) {
           }
         });
 
-      const displayName = viewType === 'subject' ? subject : teacher;
-      return _jsonOutput({"records": records, "teacher_name": displayName, "days_header": viewType === 'daily' ? foundHeaders : null});
+      const displayName = (viewType === 'subject' || viewType === 'subject_grid') ? subject : teacher;
+      const daysHeaderOut = (viewType === 'daily' || viewType === 'subject_grid') ? foundHeaders : null;
+      return _jsonOutput({"records": records, "teacher_name": displayName, "days_header": daysHeaderOut});
     }
   }
 

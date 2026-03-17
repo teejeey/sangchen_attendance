@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -157,6 +157,13 @@
                     <button id="btnSubjectView" class="btn btn-sm btn-outline-primary" onclick="showReportType('subject')">By Subject</button>
                 </div>
 
+                <div id="subjectSubToggle" class="mb-3 no-print d-none">
+                    <div class="btn-group" role="group" aria-label="Subject view toggle">
+                        <button id="btnSubjectSubSummary" type="button" class="btn btn-sm btn-outline-secondary active" onclick="setSubjectViewMode('summary')">Summary</button>
+                        <button id="btnSubjectSubDatewise" type="button" class="btn btn-sm btn-outline-secondary" onclick="setSubjectViewMode('datewise')">Date-wise</button>
+                    </div>
+                </div>
+
                 <div class="row g-2 mb-4 p-3 bg-light rounded border align-items-end no-print">
                     <div class="col-md-3">
                         <label class="form-label fw-bold small">Class (སློབ་ཚན།)</label>
@@ -200,6 +207,7 @@
 
     <script>
         let reportType = 'daily';
+        let subjectViewMode = 'summary'; // 'summary' | 'datewise'
         // Global headers for AJAX requests (available to all functions)
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
         const defaultHeaders = { 'X-Requested-With': 'XMLHttpRequest' };
@@ -220,6 +228,7 @@
 
         // Switch modes and auto-close sidebar on mobile
         function showMode(mode) {
+            try { localStorage.setItem('attendance_app_mode', mode); } catch (e) {}
             document.getElementById('takeSection').style.display = mode === 'take' ? 'block' : 'none';
             document.getElementById('viewSection').style.display = mode === 'view' ? 'block' : 'none';
             document.getElementById('timetableSection').style.display = mode === 'timetable' ? 'block' : 'none';
@@ -279,6 +288,10 @@
             document.getElementById('btnMonthlyView').classList.toggle('active', type === 'monthly');
             document.getElementById('btnSubjectView').classList.toggle('active', type === 'subject');
 
+            // Subject sub-toggle visibility
+            const subjectToggle = document.getElementById('subjectSubToggle');
+            if (subjectToggle) subjectToggle.classList.toggle('d-none', type !== 'subject');
+
             // Date label and inputs
             document.getElementById('reportDate').classList.toggle('d-none', type !== 'daily');
             document.getElementById('reportMonth').classList.toggle('d-none', type === 'daily');
@@ -306,6 +319,24 @@
             document.getElementById('reportHeaderInfo').style.display = 'none';
         }
 
+        function setSubjectViewMode(mode) {
+            subjectViewMode = mode === 'datewise' ? 'datewise' : 'summary';
+            document.getElementById('btnSubjectSubSummary')?.classList.toggle('active', subjectViewMode === 'summary');
+            document.getElementById('btnSubjectSubDatewise')?.classList.toggle('active', subjectViewMode === 'datewise');
+            // Reset to defaults when switching internal toggle
+            document.getElementById('viewClass').value = "";
+            document.getElementById('viewSubject').innerHTML = '<option value="">-- Select Subject --</option>';
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('reportMonth').value = `${yyyy}-${mm}`;
+
+            // Clear previous result table
+            document.querySelector("#viewSection table thead").innerHTML = "";
+            document.getElementById('reportList').innerHTML = '<tr><td colspan="10" class="text-center p-5 text-muted">Select filters and click Generate</td></tr>';
+            document.getElementById('reportHeaderInfo').style.display = 'none';
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             // Use local time (not UTC) so late-night times don't show yesterday's date
             const now = new Date();
@@ -316,6 +347,12 @@
             document.getElementById('attDate').value = today;
             document.getElementById('reportDate').value = today;
             document.getElementById('reportMonth').value = `${yyyy}-${mm}`;
+
+            // Restore last sidebar mode after refresh
+            let savedMode = 'take';
+            try { savedMode = localStorage.getItem('attendance_app_mode') || 'take'; } catch (e) {}
+            if (!['take', 'view', 'timetable'].includes(savedMode)) savedMode = 'take';
+            showMode(savedMode);
 
             const defaultHeaders = { 'X-Requested-With': 'XMLHttpRequest' };
             const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
@@ -555,13 +592,19 @@
                 // BUILD REQUEST URL
                 // =============================
 
-                let url = `/get_reports?class=${cls}&view_type=${reportType}&date=${dateVal}`;
+                // For By Subject -> Date-wise, fetch a subject day-grid view from backend
+                const effectiveViewType =
+                    (reportType === 'subject' && subjectViewMode === 'datewise') ? 'subject_grid' : reportType;
 
-                if (reportType === 'daily' || reportType === 'monthly') {
-                    url += `&teacher=${encodeURIComponent(teacher)}`;
-                }
+                let url = `/get_reports?class=${cls}&view_type=${effectiveViewType}&date=${dateVal}`;
 
-                if (reportType === 'subject') {
+                const needsTeacher =
+                    (effectiveViewType === 'monthly') ||
+                    (effectiveViewType === 'daily');
+                if (needsTeacher) url += `&teacher=${encodeURIComponent(teacher)}`;
+
+                // Pass subject whenever selected; daily-grid can optionally use it for filtering
+                if (subject) {
                     url += `&subject=${encodeURIComponent(subject)}`;
                 }
 
@@ -599,7 +642,7 @@
 
                 if (reportType === "subject") {
                     document.getElementById('displayTeacher').innerText =
-                        data.subject_name || subject;
+                        (subjectViewMode === 'datewise') ? (subject || data.subject_name || '') : (data.subject_name || subject);
                 } else {
                     document.getElementById('displayTeacher').innerText =
                         data.teacher_name || teacher;
@@ -634,10 +677,115 @@
                 let body = "";
 
                 // ==================================================
+                // SUBJECT DATE-WISE (SL + NAME + 1..end + totals)
+                // ==================================================
+                if (reportType === "subject" && subjectViewMode === "datewise") {
+                    // Requires days_header + student.days from the subject report payload.
+                    // If Apps Script doesn't provide this yet for subject view, we show a friendly message.
+                    const days = Array.isArray(data.days_header) ? data.days_header : [];
+                    const gridRecords = Array.isArray(data.records) ? data.records : [];
+                    const hasGrid = days.length > 0 && gridRecords.some(r => r && typeof r === 'object' && r.days && typeof r.days === 'object');
+
+                    if (!hasGrid) {
+                        list.innerHTML = `
+                        <tr>
+                            <td colspan="10" class="text-center text-muted p-5">
+                                Date-wise subject view needs day-wise data from the report service. Please use Summary view for now.
+                            </td>
+                        </tr>`;
+                        document.querySelector("#viewSection table thead").innerHTML = '';
+                        return;
+                    }
+
+                    const formatDayLabel = (d) => {
+                        const s = (d ?? '').toString().trim();
+                        return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.slice(5) : s;
+                    };
+
+                    head = `<tr>
+                        <th class="text-white" style="white-space:nowrap;">ཨང་།</th>
+                        <th class="text-white" style="min-width:220px;">མཚན་ཐོ།</th>
+                    `;
+                    days.forEach(day => {
+                        head += `<th class="text-white text-center" style="font-size:0.7rem; min-width:34px;">${formatDayLabel(day)}</th>`;
+                    });
+                    head += `
+                        <th class="text-white" style="white-space:nowrap;">ཡོངས་སྡོམ།</th>
+                        <th class="bg-success text-white" style="white-space:nowrap;">ཡོད།</th>
+                        <th class="bg-danger text-white" style="white-space:nowrap;">ཆ།</th>
+                        <th class="bg-warning text-dark" style="white-space:nowrap;">ན།</th>
+                        <th class="bg-info text-dark" style="white-space:nowrap;">ཞུ།</th>
+                        <th class="text-white" style="white-space:nowrap;">འཕྱིས།</th>
+                        <th class="text-white" style="white-space:nowrap;">%</th>
+                    </tr>`;
+
+                    const getCell = (val) => {
+                        const v = val || "-";
+                        const char =
+                            v === "Late" ? "L"
+                            : v === "-" ? "-"
+                            : v.charAt(0);
+                        const color =
+                            v === "Present" ? "text-success"
+                            : v === "Absent" ? "text-danger"
+                            : v === "Sick" ? "text-warning"
+                            : v === "Leave" ? "text-info"
+                            : v === "Late" ? "text-secondary"
+                            : "";
+                        return `<td class="text-center fw-bold ${color}">${char}</td>`;
+                    };
+
+                    let sl = 1;
+                    gridRecords.forEach(gridStudent => {
+                        const name = gridStudent?.Name || "";
+
+                        // Totals computed from grid
+                        const computed = { total: 0, P: 0, A: 0, S: 0, Lv: 0, La: 0 };
+                        days.forEach(day => {
+                            const v = gridStudent?.days?.[day] || "-";
+                            if (!v || v === "-" || v === "—") return;
+                            computed.total += 1;
+                            if (v === "Present") computed.P += 1;
+                            else if (v === "Absent") computed.A += 1;
+                            else if (v === "Sick") computed.S += 1;
+                            else if (v === "Leave") computed.Lv += 1;
+                            else if (v === "Late") computed.La += 1;
+                        });
+
+                        const totalClass = computed.total;
+                        const present = computed.P;
+                        const absent = computed.A;
+                        const sick = computed.S;
+                        const leave = computed.Lv;
+                        const late = computed.La;
+                        const pct = totalClass > 0
+                            ? (((present + late) / totalClass) * 100).toFixed(1)
+                            : 0;
+
+                        body += `<tr>
+                            <td class="text-center">${sl++}</td>
+                            <td class="fw-bold">${name}</td>
+                        `;
+                        days.forEach(day => {
+                            body += getCell(gridStudent?.days?.[day]);
+                        });
+                        body += `
+                            <td class="text-center fw-bold">${totalClass}</td>
+                            <td class="text-center text-success fw-bold">${present}</td>
+                            <td class="text-center text-danger fw-bold">${absent}</td>
+                            <td class="text-center text-warning fw-bold">${sick}</td>
+                            <td class="text-center text-info fw-bold">${leave}</td>
+                            <td class="text-center text-secondary fw-bold">${late}</td>
+                            <td class="text-center fw-bold ${pct < 75 ? 'text-danger' : ''}">${pct}%</td>
+                        </tr>`;
+                    });
+                }
+
+                // ==================================================
                 // MONTHLY + SUBJECT SUMMARY TABLE
                 // ==================================================
 
-                if (reportType === "monthly" || reportType === "subject") {
+                if (reportType === "monthly" || (reportType === "subject" && subjectViewMode === "summary")) {
 
                     head = `
                     <tr>
