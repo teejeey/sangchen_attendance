@@ -314,8 +314,12 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-
 if __name__ == '__main__':
-    debug = os.getenv('FLASK_DEBUG', 'True').lower() in ('1', 'true', 'yes')
-    print("--- Attendance System Main App Running ---")
-    app.run(port=int(os.getenv('PORT', '5000')), debug=debug)
+    # host='0.0.0.0' tells Flask to listen to all network interfaces
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+
+# if __name__ == '__main__':
+#     debug = os.getenv('FLASK_DEBUG', 'True').lower() in ('1', 'true', 'yes')
+#     print("--- Attendance System Main App Running ---")
+#     app.run(port=int(os.getenv('PORT', '5000')), debug=debug)

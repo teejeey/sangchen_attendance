@@ -90,10 +90,6 @@
         <div class="nav flex-column">
             <button id="navTake" class="nav-link btn btn-link text-start active" onclick="showMode('take')" type="button" aria-pressed="true"><i class="bi bi-pencil-square me-2"></i> Take Attendance</button>
             <button id="navView" class="nav-link btn btn-link text-start" onclick="showMode('view')" type="button" aria-pressed="false"><i class="bi bi-file-earmark-bar-graph me-2"></i> View Reports</button>
-            <button id="navLucky" class="nav-link btn btn-link text-start" 
-                onclick="showMode('lucky')" type="button" aria-pressed="false">
-                <i class="bi bi-gift me-2"></i> The Fair Caller
-            </button>
             <!-- <button id="navTimetable" class="nav-link btn btn-link text-start" onclick="showMode('timetable')" type="button" aria-pressed="false"><i class="bi bi-calendar2-week me-2"></i> Time Table</button> -->
             <button id="refresh-cache-btn" class="btn btn-sm btn-outline-secondary no-print mt-2">
                 <i class="bi bi-arrow-clockwise"></i> Refresh 
@@ -206,53 +202,6 @@
                     </table>
                 </div>
             </div>
-
-            <div id="luckySection" style="display: none;">
-                <div class="text-center">
-                    <!-- <h4 class="fw-bold mb-3">Class Lucky Draw</h4> -->
-            
-                    <div class="mb-3">
-                        <select id="luckyClassSelect" class="form-select" onchange="initWheel()">
-                            <option value="">-- Select Class --</option>
-                        </select>
-                    </div>
-            
-                    <div class="d-flex justify-content-center">
-                    <div style="position:relative; width:330px;">
-                    <div id="wheelPointer" style="position:absolute; top:-10px; left:50%; transform:translateX(-50%); z-index:50; pointer-events:none; display:none;
-                    border-left:15px solid transparent;
-                    border-right:15px solid transparent;
-                    border-top:30px solid red;"></div>
-                    
-                    <canvas id="wheelCanvas" width="330" height="330"></canvas>
-                    
-                    <div id="centerHub" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:40;
-                    width:70px; height:70px; background:#3498db; border-radius:50%;
-                    display:flex; align-items:center; justify-content:center; visibility:hidden;">
-                    
-                    <button id="spinBtn" onclick="spinWheel()" class="btn p-0" type="button" aria-label="Spin wheel" style="background:transparent; border:none; color:#fff; font-size:22px;">
-                    <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
-                    </button>
-                    </div>
-                    
-                    <div id="wheelOverlay" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:60; color:#333; background: rgba(255,255,255,0.85);">
-                    Select Class to spin!
-                    </div>
-                    </div>
-                    </div>
-            
-                    <!-- Winner Modal -->
-                    <div id="winnerModal" class="modal" tabindex="-1">
-                        <div class="modal-dialog modal-dialog-centered">
-                            <div class="modal-content text-center p-4">
-                                <h5 class="text-primary">Winner</h5>
-                                <h2 id="winnerText"></h2>
-                                <button class="btn btn-primary mt-3" onclick="closeModal()">Close</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -283,12 +232,8 @@
             document.getElementById('takeSection').style.display = mode === 'take' ? 'block' : 'none';
             document.getElementById('viewSection').style.display = mode === 'view' ? 'block' : 'none';
             document.getElementById('timetableSection').style.display = mode === 'timetable' ? 'block' : 'none';
-            document.getElementById('luckySection').style.display = mode === 'lucky' ? 'block' : 'none';
             document.getElementById('navTake').classList.toggle('active', mode === 'take');
             document.getElementById('navView').classList.toggle('active', mode === 'view');
-            document.getElementById('navLucky').classList.toggle('active', mode === 'lucky');
-            document.getElementById('navLucky').setAttribute('aria-pressed', mode === 'lucky');
-            
             const navTimetable = document.getElementById('navTimetable');
             if (navTimetable) {
                 navTimetable.classList.toggle('active', mode === 'timetable');
@@ -300,8 +245,7 @@
             }
             document.getElementById('modeTitle').innerText = 
                 mode === 'take' ? 'Daily Attendance Entry' : 
-                mode === 'view' ? 'Attendance Records' :
-                mode === 'lucky' ? 'Participation Selector' : 'Sangchen Dorji Lhundrup Nunnery Time Table - 2026';
+                mode === 'view' ? 'Attendance Records' : 'Sangchen Dorji Lhundrup Nunnery Time Table - 2026';
 
             // Auto-close on small screens
             if (window.innerWidth <= 750) {
@@ -395,8 +339,6 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             // Use local time (not UTC) so late-night times don't show yesterday's date
-
-            loadLuckyClasses();
             const now = new Date();
             const yyyy = now.getFullYear();
             const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -960,262 +902,6 @@
                 </tr>`;
             }
         }
-
-
-        // ------------------ Lucky draw wheel logic ------------------
-        let luckyStudents = [];
-        let luckyCurrentDeg = 0;
-        let luckySpinning = false;
-
-        const luckyCanvas = document.getElementById('wheelCanvas');
-        const luckyCtx = luckyCanvas.getContext('2d');
-        const spinBtn = document.getElementById('spinBtn');
-        const luckyClassSelect = document.getElementById('luckyClassSelect');
-
-        // Wheel configuration
-        const POINTER_ANGLE = 270; // pointer at top
-        const FULL_SPINS = 8;
-        const SPIN_DURATION = 5000; // match CSS transition duration
-        const EASE = 'cubic-bezier(0.1, 0, 0, 1)';
-
-        // Ensure Bootstrap JS is present when showing modal
-        function showBootstrapModal(el) {
-            if (window.bootstrap && typeof window.bootstrap.Modal === 'function') {
-                const m = new bootstrap.Modal(el);
-                m.show();
-                return m;
-            } else {
-                // fallback: just reveal by toggling classes
-                el.style.display = 'block';
-                el.classList.add('show');
-                return null;
-            }
-        }
-
-        function hideBootstrapModal(el) {
-            if (window.bootstrap && typeof window.bootstrap.Modal === 'function') {
-                const inst = bootstrap.Modal.getInstance(el);
-                if (inst) inst.hide();
-            } else {
-                el.classList.remove('show');
-                el.style.display = 'none';
-            }
-        }
-
-        function loadLuckyClasses() {
-            fetch('/get_classes', { headers: defaultHeaders })
-            .then(res => res.json())
-            .then(data => {
-                let h = '<option value="">-- Select Class --</option>';
-                data.forEach(c => h += `<option value="${c}">${c}</option>`);
-                document.getElementById('luckyClassSelect').innerHTML = h;
-            }).catch(()=>{});
-        }
-
-        // Responsive + DPR-aware canvas resizing specific for the lucky wheel
-        function resizeLuckyCanvas() {
-            const dpr = window.devicePixelRatio || 1;
-            const sizeCss = 330; // fixed CSS size used in markup
-            luckyCanvas.width = Math.round(sizeCss * dpr);
-            luckyCanvas.height = Math.round(sizeCss * dpr);
-            luckyCanvas.style.width = sizeCss + 'px';
-            luckyCanvas.style.height = sizeCss + 'px';
-            // scale drawing operations to DPR
-            luckyCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        }
-
-        window.addEventListener('resize', () => {
-            resizeLuckyCanvas();
-            drawWheel();
-        });
-
-        function initWheel() {
-            // prepare canvas
-            resizeLuckyCanvas();
-
-            const overlay = document.getElementById('wheelOverlay');
-            const centerHub = document.getElementById('centerHub');
-            const pointer = document.getElementById('wheelPointer');
-            const selectedLabel = document.getElementById('selectedClassName');
-
-            luckyCanvas.style.transition = 'none';
-            luckyCurrentDeg = 0;
-            luckyCanvas.style.transform = `rotate(0deg)`;
-
-            const cls = luckyClassSelect.value;
-            if (!cls) {
-                luckyStudents = [];
-                // show overlay & hide controls
-                if (overlay) overlay.style.display = 'flex';
-                if (centerHub) centerHub.style.visibility = 'hidden';
-                if (pointer) pointer.style.display = 'none';
-                if (selectedLabel) selectedLabel.style.display = 'none';
-                drawWheel();
-                return;
-            }
-
-            // class selected: hide overlay and show controls
-            if (overlay) overlay.style.display = 'none';
-            if (centerHub) centerHub.style.visibility = 'visible';
-            if (pointer) pointer.style.display = 'block';
-            if (selectedLabel) { selectedLabel.innerText = cls; selectedLabel.style.display = 'block'; }
-
-            fetch(`/get_students/${cls}?date=${document.getElementById('attDate').value}&subject=`)
-            .then(res => res.json())
-            .then(data => {
-                luckyStudents = (data.students || []).map(s => s.Name).filter(Boolean);
-
-                luckyCurrentDeg = 0;
-                luckyCanvas.style.transition = 'none';
-                luckyCanvas.style.transform = `rotate(0deg)`;
-
-                // show controls only when there are students to display
-                if (luckyStudents.length > 0) {
-                    if (overlay) overlay.style.display = 'none';
-                    if (centerHub) centerHub.style.visibility = 'visible';
-                    if (pointer) pointer.style.display = 'block';
-                } else {
-                    if (overlay) overlay.style.display = 'flex';
-                    if (centerHub) centerHub.style.visibility = 'hidden';
-                    if (pointer) pointer.style.display = 'none';
-                }
-
-                drawWheel();
-                // ensure transition is set for next spin
-                setTimeout(() => luckyCanvas.style.transition = `transform ${SPIN_DURATION}ms ${EASE}`, 50);
-            }).catch(() => {
-                luckyStudents = [];
-                if (overlay) overlay.style.display = 'flex';
-                if (centerHub) centerHub.style.visibility = 'hidden';
-                if (pointer) pointer.style.display = 'none';
-                drawWheel();
-            });
-        }
-
-        function drawWheel() {
-            const num = luckyStudents.length;
-            const dpr = window.devicePixelRatio || 1;
-            const size = parseInt(luckyCanvas.style.width || '330', 10);
-
-            // clear using CSS pixels (context already scaled for DPR)
-            luckyCtx.clearRect(0, 0, size, size);
-
-            if (num === 0) {
-                // draw empty circle
-                luckyCtx.save();
-                luckyCtx.beginPath();
-                luckyCtx.arc(size/2, size/2, size/2 - 6, 0, Math.PI*2);
-                luckyCtx.fillStyle = '#ddd';
-                luckyCtx.fill();
-                luckyCtx.restore();
-                return;
-            }
-
-            const angle = (2 * Math.PI) / num;
-            const center = size / 2;
-            const radius = center - 6;
-
-            luckyStudents.forEach((name, i) => {
-                luckyCtx.save();
-                luckyCtx.beginPath();
-                luckyCtx.moveTo(center, center);
-                luckyCtx.arc(center, center, radius, i * angle, (i + 1) * angle);
-                luckyCtx.closePath();
-                luckyCtx.fillStyle = `hsl(${(i * 360) / num}, 70%, 50%)`;
-                luckyCtx.fill();
-                luckyCtx.strokeStyle = '#222';
-                luckyCtx.lineWidth = 1.2;
-                luckyCtx.stroke();
-
-                // label
-                luckyCtx.translate(center, center);
-                luckyCtx.rotate(i * angle + angle / 2);
-                luckyCtx.textAlign = 'right';
-                luckyCtx.textBaseline = 'middle';
-                const fontSize = Math.max(10, Math.min(14, Math.floor(radius / 8)));
-                luckyCtx.fillStyle = '#fff';
-                luckyCtx.font = `bold ${fontSize}px Arial`;
-                const textX = radius - 12;
-                // clip long names gracefully
-                let label = String(name || '');
-                if (luckyCtx.measureText(label).width > (radius - 30)) {
-                    // truncate
-                    while (luckyCtx.measureText(label + '...').width > (radius - 30) && label.length > 0) {
-                        label = label.slice(0, -1);
-                    }
-                    label = label + '...';
-                }
-                luckyCtx.fillText(label, textX, 0);
-                luckyCtx.restore();
-            });
-        }
-
-        // use transitionend for robust end-of-spin detection
-        luckyCanvas.addEventListener('transitionend', (e) => {
-            if (e.propertyName === 'transform' && luckySpinning) {
-                finalizeSpin();
-            }
-        });
-
-        function spinWheel() {
-            if (luckySpinning) return;
-            if (!luckyStudents.length) return alert('No students found');
-
-            luckySpinning = true;
-            spinBtn.disabled = true;
-            luckyClassSelect.disabled = true;
-
-            const spin = (FULL_SPINS * 360) + Math.floor(Math.random() * 360);
-            luckyCurrentDeg += spin;
-
-            // ensure transition duration
-            luckyCanvas.style.transition = `transform ${SPIN_DURATION}ms ${EASE}`;
-            // trigger rotation
-            requestAnimationFrame(() => {
-                luckyCanvas.style.transform = `rotate(${luckyCurrentDeg}deg)`;
-            });
-
-            // fallback: in case transitionend doesn't fire, ensure finalize after duration + small buffer
-            setTimeout(() => { if (luckySpinning) finalizeSpin(); }, SPIN_DURATION + 200);
-        }
-
-        function finalizeSpin() {
-            if (!luckySpinning) return;
-            luckySpinning = false;
-
-            // compute winner
-            const normalizedDeg = luckyCurrentDeg % 360; // 0..359
-            const slice = 360 / luckyStudents.length;
-            const adjustedDeg = (360 - normalizedDeg + POINTER_ANGLE) % 360;
-            const index = Math.floor(adjustedDeg / slice) % luckyStudents.length;
-            const winner = luckyStudents[index];
-
-            // display winner
-            const modalEl = document.getElementById('winnerModal');
-            document.getElementById('winnerText').innerText = winner || '—';
-            showBootstrapModal(modalEl);
-
-            // re-enable controls
-            spinBtn.disabled = false;
-            luckyClassSelect.disabled = false;
-        }
-
-        function closeModal() {
-            const modalEl = document.getElementById('winnerModal');
-            hideBootstrapModal(modalEl);
-        }
-
-        // initialize once DOM ready
-        document.addEventListener('DOMContentLoaded', () => {
-            resizeLuckyCanvas();
-            // draw an initial empty wheel so user sees the circle before selecting a class
-            try { drawWheel(); } catch (e) {}
-            // load classes already called earlier but safe to call again
-            loadLuckyClasses();
-        });
     </script>
-
-    <!-- Bootstrap JS (required for modal) -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
